@@ -36,11 +36,11 @@ This project analyzes inpatient claims data for 37,780 Medicare beneficiaries to
 - `matplotlib` for visualization
 
 ## Repository Structure
+```
 cms-readmission-analysis/
-
 ├── analysis.py        # Core analysis script
-
 └── README.md
+```
 
 ## Setup
 
