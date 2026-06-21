@@ -9,7 +9,7 @@ This project analyzes inpatient claims data for 37,780 Medicare beneficiaries to
 ## Key Findings
 
 - **29.61% 30-day readmission rate** across 28,993 analyzed claims
-- Readmitted patients cost Medicare **$492 more per claim* on average ($10,093 vs $9,601)
+- Readmitted patients cost Medicare **$492 per claim * on average ($10,093 vs $9,601)
 - Payment difference is statistically significant (t-test, p < 0.0001)
 - DRG codes 289, 293, and 853 show the highest readmission rates (42–44%)
 - Readmission rate declined from 44% in 2008 to 15% in 2010
@@ -39,6 +39,7 @@ This project analyzes inpatient claims data for 37,780 Medicare beneficiaries to
 cms-readmission-analysis/
 
 ├── analysis.py        # Core analysis script
+
 └── README.md
 
 ## Setup
