@@ -1,18 +1,20 @@
 """
 CMS SynPUF 30-day readmission analysis (revised, Nov 2026).
 
-Readmission definition (simplified version of the CMS approach):
+Readmission definition (simplified, inspired by the CMS measure):
   - Index stay: every inpatient discharge that has a full 30 days of
     follow-up left in the data (discharged on or before 2010-12-01).
   - Readmission: the patient's NEXT admission starts 1 to 30 days after
-    that discharge. Gaps of 0 days or less (same-day transfers,
+    that discharge. Gaps of 0 days or less (same-day admissions and
     overlapping claims) are not counted as readmissions.
   - Rate = index stays followed by a readmission / all index stays.
   - Readmission rates by DRG use the DRG of the INDEX stay (the
-    condition the patient was discharged with), as CMS does.
+    condition the patient was discharged with).
 
-Not replicated from CMS: exclusions for planned readmissions, deaths,
-and gaps in Medicare enrollment.
+Differences from the CMS Hospital-Wide Readmission measure: includes
+patients under 65, does not combine transfer chains, applies no
+enrollment, death or planned-readmission exclusions, groups by DRG
+rather than CMS specialty cohorts, and is not risk adjusted.
 
 The script also re-creates the original (June 2026) method so the two
 can be compared side by side.
@@ -51,6 +53,7 @@ def _bene_select(year):
 
 
 _flag_sum = " + ".join(f"IF(b.{f} = 1, 1, 0)" for f in FLAGS)  # raw coding: 1 = present, 2 = absent
+_prior_flag_sum = " + ".join(f"IF(bp.{f} = 1, 1, 0)" for f in FLAGS)
 
 MAIN_QUERY = f"""
 WITH beneficiary AS (
@@ -85,11 +88,15 @@ SELECT
   DATE_DIFF(s.admit_dt, s.prev_disch_dt, DAY) AS days_since_prev_disch,
   PARSE_DATE('%Y%m%d', CAST(b.BENE_BIRTH_DT AS STRING)) AS birth_dt,
   b.BENE_SEX_IDENT_CD,
-  CASE WHEN b.DESYNPUF_ID IS NULL THEN NULL ELSE ({_flag_sum}) END AS chronic_condition_count
+  CASE WHEN b.DESYNPUF_ID IS NULL THEN NULL ELSE ({_flag_sum}) END AS chronic_condition_count,
+  CASE WHEN bp.DESYNPUF_ID IS NULL THEN NULL ELSE ({_prior_flag_sum}) END AS prior_chronic_count
 FROM sequenced s
 LEFT JOIN beneficiary b
   ON s.DESYNPUF_ID = b.DESYNPUF_ID
  AND EXTRACT(YEAR FROM s.admit_dt) = b.bene_year
+LEFT JOIN beneficiary bp   -- previous year's file, for the robustness check
+  ON s.DESYNPUF_ID = bp.DESYNPUF_ID
+ AND EXTRACT(YEAR FROM s.admit_dt) - 1 = bp.bene_year
 """
 
 
@@ -199,8 +206,24 @@ def run_analysis(checks, df):
     w_diff = (within[True] - within[False]).mean()
     w_t = stats.ttest_rel(within[True], within[False])
     w_wx = stats.wilcoxon(within[True], within[False])
+    w = within[True] - within[False]
     print(f"   Within-patient: {len(within):,} patients, mean diff ${w_diff:,.0f}, "
-          f"paired t p = {w_t.pvalue:.2e}, Wilcoxon p = {w_wx.pvalue:.2e}")
+          f"median diff ${w.median():,.0f}")
+    print(f"      Readmission stay cheaper for {int((w < 0).sum()):,} patients, "
+          f"more expensive for {int((w > 0).sum()):,}")
+    print(f"      Paired t p = {w_t.pvalue:.2e}, Wilcoxon p = {w_wx.pvalue:.2e}")
+    print(f"   Payments that are multiples of $1,000: {100 * (pay['CLM_PMT_AMT'] % 1000 == 0).mean():.1f}%")
+
+    # ── 4b. Robustness: chronic conditions from the PREVIOUS year's file ──────
+    # Same-year flags are built from the same year's claims, so they can
+    # reflect the index stay itself. Prior-year flags avoid that.
+    print("\n" + "=" * 70)
+    print("4b. CHRONIC CONDITIONS FROM THE PRIOR YEAR (2009-2010 index stays only)")
+    prior = idx[idx["prior_chronic_count"].notna()].copy()
+    prior["cc_group"] = pd.cut(prior["prior_chronic_count"], bins=[-1, 2, 5, 8, 11],
+                               labels=["0-2", "3-5", "6-8", "9-11"])
+    print(f"   Index stays with a prior-year match: {len(prior):,}")
+    print(rate_table(prior, "cc_group", "readmit_30d").to_string(index=False))
 
     # ── 5. Charts ─────────────────────────────────────────────────────────────
     fig, axes = plt.subplots(2, 3, figsize=(16, 10))
@@ -215,7 +238,7 @@ def run_analysis(checks, df):
     ax[0].bar(x - 0.2, old_y["rate_pct"].values[: len(x)], 0.4, label="Original method", color="lightgray")
     ax[0].bar(x + 0.2, new_y["rate_pct"].values, 0.4, label="Revised method", color="steelblue")
     ax[0].set_xticks(x, new_y["discharge_year"].astype(str))
-    ax[0].set_title("Readmission rate by year: original vs revised")
+    ax[0].set_title("Rate by year: original (admission yr) vs revised (discharge yr)", fontsize=10)
     ax[0].set_ylabel("Rate (%)")
     ax[0].legend()
 
